@@ -7,6 +7,7 @@ from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
 from langchain.tools import tool
 import argparse
+from langchain_tavily import TavilySearch
 
 
 
@@ -30,6 +31,13 @@ llm = ChatOpenAI(
     base_url=base_url,
     temperature=0,
     extra_body={"enable_thinking": False},
+)
+
+# 初始化 Tavily 网页搜索工具
+tavily_search = TavilySearch(
+    max_results=5,
+    topic="general",
+    search_depth="basic",
 )
 
 #定义工具
@@ -87,14 +95,18 @@ def calculate_monthly_llm_cost(
 # 创建研究 Agent
 research_agent = create_agent(
     model=llm,
-    tools=[calculate_monthly_llm_cost],
+    tools=[calculate_monthly_llm_cost, tavily_search],
     name ="research_agent",
 
     system_prompt=(
         "你是一名 AI 技术研究助理，负责分析问题、收集已提供的信息并完成计算。"
         "请使用中文回答，内容应准确、清晰，并区分已知事实与假设。"
         "对于一般技术问题，请根据需要说明核心概念、主要优势、主要局限和适用场景。"
-        "不要声称自己进行了实际联网搜索。"
+        "当用户询问行业研究、市场规模、企业动态、产品对比或最新数据时，"
+        "必须优先调用 tavily_search 获取网页资料。"
+        "研究报告应区分已核实的信息、来源观点和分析推断。"
+        "引用搜索结果时，尽可能保留来源标题、完整 URL 和对应的关键事实。"
+        "如果搜索结果不足以支持结论，应明确说明，不得编造来源或数据。"
         "当任务需要估算大语言模型的调用成本时，"
         "必须调用 calculate_monthly_llm_cost 工具进行计算，"
         "不得只凭语言模型的估算直接给出计算结果。"
@@ -166,7 +178,16 @@ supervisor = create_supervisor(
         "必须根据任务需要合理分配工作，"
         "不得为了满足固定调用顺序而执行无必要的任务。"
         "在必要的子 Agent 完成工作之前，不得生成最终答案。"
-        "不要声称执行了实际联网搜索。"
+
+        "对于行业研究、市场规模、企业动态和最新数据等任务，"
+        "应要求 research_agent 实际调用 tavily_search 获取网页资料。"
+        "最终回答应尽可能保留关键结论对应的来源标题和完整 URL。"
+        "不得把搜索摘要未经核验地表述为确定事实。"
+        "研究任务完成后，应调用 review_agent 检查关键数据、来源可靠性、"
+        "时间范围、统计口径以及不同来源之间的矛盾。"
+        "如果不同机构的数据不一致，应说明各自的估算及差异，"
+        "不得随意选择其中一个数字并将其说成唯一正确答案。"
+
     ),
 ).compile()
 
@@ -241,13 +262,49 @@ if __name__ == "__main__":
             content = str(message.content).replace("\n", " ")
             print(f"[{i}] {sender}: {content[:120]}...")
 
-    print("\n===== 最后几条消息诊断 =====")
+    print("\n===== 执行结果摘要 =====")
 
-    for message in result["messages"][-5:]:
-        print(f"\n类型：{type(message).__name__}")
-        print(f"名称：{getattr(message, 'name', None)}")
-        print(f"工具调用：{getattr(message, 'tool_calls', None)}")
-        print(f"内容：{str(message.content)[:1500]}")
+    messages = result.get("messages", [])
+    agent_names = set()
+    tool_names = set()
+
+    for message in messages:
+        name = getattr(message, "name", None)
+        if name in {"research_agent", "review_agent"}:
+            agent_names.add(name)
+
+        for call in getattr(message, "tool_calls", []) or []:
+            tool_name = call.get("name")
+            if tool_name:
+                tool_names.add(tool_name)
+
+    print(f"消息总数：{len(messages)}")
+    print(f"参与的 Agent：{', '.join(sorted(agent_names)) or '未识别'}")
+
+    search_tools = sorted(
+        name for name in tool_names
+        if "tavily" in name.lower()
+    )
+    handoff_tools = sorted(
+        name for name in tool_names
+        if name.startswith("transfer_to_")
+        or name.startswith("transfer_back_to_")
+    )
+    other_tools = sorted(
+        tool_names - set(search_tools) - set(handoff_tools)
+    )
+
+    print(f"网页搜索工具：{', '.join(search_tools) or '未调用'}")
+    print(f"Agent 转交工具：{', '.join(handoff_tools) or '未调用'}")
+    print(f"其他工具：{', '.join(other_tools) or '未调用'}")
+
+    final_message = messages[-1] if messages else None
+    final_content = str(getattr(final_message, "content", "")).strip()
+
+    print(f"最终回答已生成：{'是' if final_content else '否'}")
+    if final_content:
+        preview = " ".join(final_content.split())
+        print(f"最终回答预览：{preview[:200]}...")
 
     print("\n===== Supervisor 最终回答 =====")
     final_message = result["messages"][-1]

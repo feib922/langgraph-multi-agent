@@ -4,3 +4,5 @@ langchain-openai==1.7.2
 langgraph==1.2.16
 langgraph-supervisor==0.0.31
 python-dotenv==1.2.4
+
+langchain-tavily>=0.2.18
