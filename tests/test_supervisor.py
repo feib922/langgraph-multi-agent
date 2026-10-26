@@ -9,21 +9,21 @@ class TestSupervisorSetup(unittest.TestCase):
     @patch.dict(
         "os.environ",
         {
-            "SILICON_FLOW_API_KEY": "test-api-key",
+            "SILICON_FLOW_API_KEY": "tests-api-key",
             "SILICON_FLOW_API_URL": "https://api.siliconflow.cn/v1",
         },
     )
     def test_import_cost_tool_without_api_request(self):
         """导入成本工具时，不应发起真实模型请求。"""
         with patch("langchain_openai.ChatOpenAI") as mock_chat:
-            import main
+            from tools.cost_calculator import calculate_monthly_llm_cost
 
             self.assertEqual(
-                main.calculate_monthly_llm_cost.name,
+                calculate_monthly_llm_cost.name,
                 "calculate_monthly_llm_cost",
             )
 
-            result = main.calculate_monthly_llm_cost.invoke(
+            result = calculate_monthly_llm_cost.invoke(
                 {
                     "daily_queries": 200,
                     "input_tokens_per_query": 3000,
@@ -39,10 +39,10 @@ class TestSupervisorSetup(unittest.TestCase):
 
     def test_supervisor_graph_structure(self):
         """验证 Supervisor 的节点、连接和交接工具。"""
-        import main
+        from graph import supervisor
 
         # 验证外层工作流包含两个 Agent
-        graph = main.supervisor.get_graph()
+        graph = supervisor.get_graph()
         expected_nodes = {
             "__start__",
             "supervisor",

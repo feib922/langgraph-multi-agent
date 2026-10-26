@@ -1,7 +1,7 @@
 
 import unittest
 
-from main import calculate_monthly_llm_cost
+from tools.cost_calculator import calculate_monthly_llm_cost
 
 
 class TestMonthlyLLMCost(unittest.TestCase):
